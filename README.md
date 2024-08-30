@@ -24,4 +24,3 @@ The first step was to run the **RNA-splice pipeline** using Nextflow. To achieve
 The second step was to examine the outputs/results obtained by the pipeline. To achieve this: 
 
 
-[A]([https://www.ejemplo.com](https://github.com/SergioManzano10/RNA-sequencing_FMP/blob/main/BASH%20scripts/nextflow_rnaseq.config))
