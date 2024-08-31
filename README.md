@@ -27,4 +27,6 @@ The first step was to run the **RNA-splice pipeline** using Nextflow. To achieve
 
 The second step was to examine the outputs/results obtained by the pipeline. To achieve this: 
 
+* First, we performed a differential exon usage analysis (DEU). The code is located in the R scripts folder under the name *DEU_noaggregation_specificity.Rmd*
+
 
