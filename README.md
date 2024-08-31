@@ -10,7 +10,7 @@ Comparison of TPM values between our study and those obtained from GTEx. The cod
 ## RNA-seq
 The first step was to run the **RNA-seq pipeline** using Nextflow. To achieve this: 
 
-* We created a nextflow.config file, located in the BASH scripts folder under the name ![nextflow_rnaseq.config](R scripts/nextflow_rnaseq.config)*nextflow_rnaseq.config*. This file contains the Nextflow requirements for job distribution and resource allocation.
+* We created a nextflow.config file, located in the BASH scripts folder under the name ![nextflow_rnaseq.config](R/nextflow_rnaseq.config)*nextflow_rnaseq.config*. This file contains the Nextflow requirements for job distribution and resource allocation.
   
 * We created a shell script with the necessary specifications to run the nf-core pipeline, located in the BASH scripts folder under the name *sh_rnaseq.sh*.
 
