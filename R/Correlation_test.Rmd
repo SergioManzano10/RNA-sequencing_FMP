@@ -1,0 +1,127 @@
+---
+title: "Correlation Test"
+author: "Sergio Manzano"
+date: "2024-05-17"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+Script preparation
+
+```{r}
+
+setwd("C:/Users/smanz/OneDrive/Escritorio/TFM/Results/Correlation-GTEx-nfcore")
+
+```
+
+### GTEX: whole blood (median TPM) 
+
+Import the TPM values of the whole transcriptome coming from the GTEX
+
+```{r}
+
+gene_name <- c("BRCA1", "BRCA2", "PALB2", "MLH1", "MSH2", "MSH6", "TP53", "BARD1", "CHEK2", "ATM", "BRIP1", "RAD51C", "RAD51D", "PTEN", "CDH1")
+
+GTEX_medianTPM <- c(0.88, 0.2, 0.84, 6.61, 1.35, 2.32, 7.69, 0.65, 1.25, 3.5, 0.09, 0.67, 1.072, 40.27, 0.21)
+
+GTEX <- data.frame(gene_name = gene_name, median_TPM_GTEX = GTEX_medianTPM)
+
+GTEX
+
+```
+
+### VHIO (RNA seq)
+
+Import the TPM values of the whole transcriptome coming from the VHIO
+
+```{r}
+
+VHIO <- read.table("salmon.merged.gene_TPM_dedup.tsv", header = T, sep = "\t")
+VHIO
+
+View(VHIO)
+
+```
+
+Calculate the median TPM for each gene and create the "median" column
+
+```{r}
+
+median_V <- apply(VHIO[,3:55], 1, median)
+VHIO$median_TPM_VHIO <- median_V
+
+View(VHIO)
+
+```
+
+
+### Perform the correlation test for the 15 genes of interest.
+
+```{r}
+
+interest_genes <- c("BRCA1", "BRCA2", "PALB2", "MLH1", "MSH2", "MSH6", "TP53", "BARD1", "CHEK2", "ATM", "BRIP1", "RAD51C", "RAD51D", "PTEN", "CDH1")
+
+VHIO_interest <- VHIO[VHIO$gene_id %in% interest_genes,]
+
+VHIO_interest_ordered <- VHIO_interest[order(VHIO_interest$gene_name),]
+GTEX_interest_ordered <- GTEX[order(GTEX$gene_name),]
+
+identical(GTEX_interest_ordered$gene_name, VHIO_interest_ordered$gene_id)
+
+
+```
+
+#### Plot 1
+
+```{r}
+
+allgenes_test <- cor.test(GTEX_interest_ordered$median_TPM_GTEX, VHIO_interest_ordered$median_TPM_VHIO)
+allgenes_test
+
+plot(GTEX_interest_ordered$median_TPM_GTEX, VHIO_interest_ordered$median_TPM_VHIO,
+     xlab = "Median TPM GTEX", ylab = "Median TPM VHIO", main = "Correlation Plot (Median Gene TPM)")
+
+abline(lm(VHIO_interest_ordered$median_TPM_VHIO ~ GTEX_interest_ordered$median_TPM_GTEX), col = "red")
+
+text(x = 30, 
+     y = 160,
+     labels = paste("R =", round(0.9767265, 2)))
+
+```
+
+#### Plot 2
+
+```{r}
+
+allgenes_test <- cor.test(GTEX_interest_ordered$median_TPM_GTEX, VHIO_interest_ordered$median_TPM_VHIO)
+allgenes_test
+
+row.names(GTEX_interest_ordered) <- GTEX_interest_ordered$gene_name
+
+
+library(ggplot2)
+
+ggplot(mapping = aes(x = GTEX_interest_ordered$median_TPM_GTEX, 
+                     y = VHIO_interest_ordered$median_TPM_VHIO)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +  
+  geom_text(mapping = aes(label = paste("", row.names(GTEX_interest_ordered))), 
+            vjust = -0.5, hjust = 0.5, size = 3) +  
+  labs(x = "Median TPM GTEx", y = "Median TPM VHIO", 
+       title = paste("Correlation Plot (Median Gene TPM)")) +
+  theme_classic() + xlim(0,45) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+
+  annotate("text", x = 30, y = 150, label = paste("R² = 0.98"), hjust = 1, vjust = 0, colour = "blue")
+
+
+
+
+```
+

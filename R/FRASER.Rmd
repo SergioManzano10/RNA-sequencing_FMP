@@ -1,0 +1,207 @@
+---
+title: "FRASER aberrant splicing"
+author: "Sergio Manzano"
+date: "2024-06-04"
+output:
+  BiocStyle::html_document:
+    theme: spacelab
+    number_sections: true
+    toc_float: true
+    toc_depth: 3
+---
+
+The main article of this tool is: https://www.nature.com/articles/s41596-020-00462-5
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+setwd("C:/Users/smanz/OneDrive/Escritorio/TFM/Results/FRASER_analysis")
+
+```
+
+# **FRASER**
+
+## *FRASER first analysis*
+
+This package is coming from: https://github.com/gagneurlab/FRASER-analysis
+
+### Library loading
+
+```{r Library, warning=FALSE, message=FALSE}
+
+# First analysis
+library(FRASER)
+library(TxDb.Hsapiens.UCSC.hg19.knownGene)
+library(org.Hs.eg.db)
+library(DT)
+
+# To increase the speed
+library(BiocParallel)
+register(SerialParam())
+
+
+```
+
+
+### Create the FraserDataSet object from the *.bam files* obtained from the RNA-splice pipeline 
+
+```{r Object Creation}
+
+sampleTable <- fread("FilesPath.csv") # Sheet to read the files
+
+settings <- FraserDataSet(colData=sampleTable, workingDir="FRASER_output") 
+# show(settings)
+
+```
+
+
+### Obtain the Counting reads from the FraserDataSet object
+
+```{r Counting Reads, warning=FALSE, message=FALSE}
+
+# Parallelization
+if(.Platform$OS.type=="unix"){ 
+  register(MulticoreParam(workers=min(10,multicoreWorkers()))) 
+}else{ 
+    register(SnowParam(workers=min(10,multicoreWorkers()))) 
+  }
+
+
+# Count reads
+fds <- countRNAData(settings) 
+
+```
+
+### Results
+
+We are going to detect all types of aberrant splicing using the three metrics (ψ5, ψ3, θ).
+
+* **psi5 (ψ5)**: It is used to assess the acceptor site usage in a specific context, indicating how often a particular acceptor site is used with a given donor site compared to all other acceptor sites.
+
+* **psi3 (ψ3)**: It is used to assess the donor site usage in a specific context, indicating how often a particular donor site is used with a given acceptor site compared to all other donor sites.
+
+* **Theta (θ)**: Measures the overall splicing efficiency of a splice site, regardless of which other splice site it is paired with. The theta metric is used to detect partial or full intron retention events, in addition to alternative splicing events that are captured by the psi5 and psi3 metrics.
+
+#### Calculate the PSI values
+
+```{r PSI calculation, warning=FALSE, message=FALSE}
+
+# Compute stats 
+fds <- calculatePSIValues(fds, overwrite = TRUE) 
+
+# Filter junctions with low expression 
+fds <- filterExpressionAndVariability(fds, minExpressionInOneSample=20, minDeltaPsi=0.0, filter=TRUE) 
+
+```
+
+#### Fitting the splicing model
+
+The results for each splicing model are:
+* psi5: 2
+* psi3: 2
+* theta: 5
+
+```{r Fitting for psi5, warning=FALSE, message=FALSE, eval=FALSE, echo=FALSE}
+
+# Fitting the splicing model for psi5
+fds <- optimHyperParams(fds, type="psi5", plot=FALSE)
+bestQ(fds, type="psi5") # 2
+plotEncDimSearch(fds, type="psi5")
+
+# Fitting the splicing model for psi3
+fds <- optimHyperParams(fds, type="psi3", plot=FALSE)
+bestQ(fds, type="psi3") # 2
+plotEncDimSearch(fds, type="psi3")
+
+# Fitting the splicing model for theta
+fds <- optimHyperParams(fds, type="theta", plot=FALSE)
+bestQ(fds, type="theta") # 5
+plotEncDimSearch(fds, type="theta")
+
+
+```
+
+
+#### Running the full pipeline
+
+We have only used the fitting model obtained for psi5 because the pipeline gives results for psi5, psi3 and theta without specifying all of them.
+
+```{r FRASER Pipeline, warning=FALSE, message=FALSE}
+
+fds <- FRASER(fds, q=c(psi5=2))
+
+```
+
+
+```{r, echo=FALSE, eval=FALSE}
+
+#save(fds, file = "fds.RData")
+load("fds.RData")
+
+```
+
+
+#### Making the annotation and extracting the results
+
+
+* Annotation and results extraction for psi5
+
+```{r Annotation type psi5, warning=FALSE, message=FALSE}
+
+# Annotation
+fds5 <- annotateRanges(fds, GRCh=38)
+  rowRanges(fds5, type="psi5")[,c("hgnc_symbol")]
+  
+# Results extraction psi5
+res5 <- results(fds5, padjCutoff=0.05, deltaPsiCutoff=0.1) 
+
+# Data table
+genes <- c("BRCA1", "CDH1", "MLH1", "PALB2", "MSH2", "RAD51C", "MSH6", "BRIP1", "BARD1", "BRCA2", "TP53", "ATM", "PTEN", "CHEK2", "RAD51D")
+
+hgnc_symbols_vector5 <- as.character(res5$hgncSymbol)
+filtered_granges_5 <- res5[hgnc_symbols_vector5 %in% genes]
+
+PSI_df <- as.data.frame(filtered_granges_5)
+
+PSI_df2 <- data.frame(sampleID = PSI_df$sampleID, start = PSI_df$start, end = PSI_df$end, geneID = PSI_df$hgncSymbol, type= PSI_df$type, padjust = PSI_df$padjust)
+
+
+datatable(PSI_df2, 
+          options = list(paging = TRUE, pageLength = 10, searching = TRUE, ordering = TRUE, info = TRUE))
+
+```
+
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+# Save the results
+results_5 <- save(res5, file = "res5.RData")
+
+
+```
+
+
+Here we can see some examples of volcano plots, but in this case not only the genes of interest have been selected (the plots include all genes).
+
+
+```{r Results plottig, fig.align='center'}
+
+plotVolcano(fds5, sampleID="AZ1954", type="psi5", aggregate=TRUE, padjCutoff = 0.05)
+
+plotVolcano(fds5, sampleID="AZ1971", type="psi5", aggregate=TRUE, padjCutoff = 0.05)
+
+plotVolcano(fds5, sampleID="AZ1976", type="psi5", aggregate=TRUE, padjCutoff = 0.05)
+
+plotVolcano(fds5, sampleID="AZ1979", type="psi5", aggregate=TRUE, padjCutoff = 0.05)
+
+plotVolcano(fds5, sampleID="AZ1998", type="psi5", aggregate=TRUE, padjCutoff = 0.05)
+
+plotVolcano(fds5, sampleID="AZ2000", type="psi5", aggregate=TRUE, padjCutoff = 0.05)
+
+
+
+```
+
+
+
+
+
