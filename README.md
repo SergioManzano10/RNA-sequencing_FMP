@@ -2,7 +2,6 @@
 This repository contains the code used to carry out the final master project titled: **RNA sequencing role in the genetic diagnosis of hereditary breast and ovarian cancer.**
 
 ## Quality control (QC)
-
 Comparison of TPM values between our study and those obtained from GTEx. The code is located in the R scripts folder under the name *Correlation_test.Rmd*
 
 ## RNA-seq
@@ -15,6 +14,7 @@ The first step was to run the **RNA-seq pipeline** using Nextflow. To achieve th
 The second step was to examine the outputs/results obtained by the pipeline. To achieve this: 
 
 * First, we performed a differential expression analysis (DEA). The code is located in the R scripts folder under the name *RNA-seq.Rmd*
+  
 * Second, we performed an analysis to find aberrantly expressed genes in RNA-seq samples. The code is located in the R scripts folder under the name *OUTRIDER.Rmd*
 
 
@@ -30,5 +30,8 @@ The second step was to examine the outputs/results obtained by the pipeline. To 
 * First, we performed a differential exon usage analysis (DEU). The code is located in the R scripts folder under the name *DEU_noaggregation_specificity.Rmd*
   
 * Second, we processed the .dpsi objects obtained from the SUPPA analysis, which was automatically performed by the pipeline. The code is located in the R scripts folder under the name *Table_of_LocalEvents.Rmd*
+
+* Third, we performed an analysis for the detection of aberrant gene expression events in RNA-seq data. The code is located in the R scripts folder under the name *FRASER.Rmd*
+
 
 
