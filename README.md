@@ -5,14 +5,14 @@ Here is the workflow followed in the project:
 ![WorkFlow](IMAGES/WorkFlow.png)
 
 ## Quality control (QC)
-Comparison of TPM values between our study and those obtained from GTEx. The code is located in the R folder under the name ![Correlation_test.Rmd](R/Correlation_test.Rmd)..
+Comparison of TPM values between our study and those obtained from GTEx. The code is located in the R folder under the name ![Correlation_test.Rmd](R/Correlation_test.Rmd).
 
 ## RNA-seq
 The first step was to run the **RNA-seq pipeline** using Nextflow. To achieve this: 
 
-* We created a nextflow.config file, located in the BASH folder under the name ![nextflow_rnaseq.config](BASH/nextflow_rnaseq.config).. This file contains the Nextflow requirements for job distribution and resource allocation.
+* We created a nextflow.config file, located in the BASH folder under the name ![nextflow_rnaseq.config](BASH/nextflow_rnaseq.config). This file contains the Nextflow requirements for job distribution and resource allocation.
   
-* We created a shell script with the necessary specifications to run the nf-core pipeline, located in the BASH folder under the name ![sh_rnaseq.sh](BASH/sh_rnaseq.sh)..
+* We created a shell script with the necessary specifications to run the nf-core pipeline, located in the BASH folder under the name ![sh_rnaseq.sh](BASH/sh_rnaseq.sh).
 
 The second step was to examine the outputs/results obtained by the pipeline. To achieve this: 
 
