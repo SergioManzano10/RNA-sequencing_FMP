@@ -16,25 +16,25 @@ The first step was to run the **RNA-seq pipeline** using Nextflow. To achieve th
 
 The second step was to examine the outputs/results obtained by the pipeline. To achieve this: 
 
-* First, we performed a differential expression analysis (DEA). The code is located in the R scripts folder under the name *RNA-seq.Rmd*
+* First, we performed a differential expression analysis (DEA). The code is located in the R scripts folder under the name ![RNA-seq.Rmd](R/RNA-seq.Rmd).
   
-* Second, we performed an analysis to find aberrantly expressed genes in RNA-seq samples. The code is located in the R scripts folder under the name *OUTRIDER.Rmd*
+* Second, we performed an analysis to find aberrantly expressed genes in RNA-seq samples. The code is located in the R scripts folder under the name ![OUTRIDER.Rmd](R/OUTRIDER.Rmd).
 
 
 ## RNA-splice
 The first step was to run the **RNA-splice pipeline** using Nextflow. To achieve this: 
 
-* We created a nextflow.config file, located in the BASH scripts folder under the name *nextflow_rnasplice.config*. This file contains the Nextflow requirements for job distribution and resource allocation.
+* We created a nextflow.config file, located in the BASH scripts folder under the name ![nextflow_rnasplice.config](BASH/nextflow_rnasplice.config). This file contains the Nextflow requirements for job distribution and resource allocation.
   
-* We created a shell script with the necessary specifications to run the nf-core pipeline, located in the BASH scripts folder under the name *sh_rnasplice.sh*.
+* We created a shell script with the necessary specifications to run the nf-core pipeline, located in the BASH scripts folder under the name ![sh_rnasplice.sh](BASH/sh_rnasplice.sh).
 
 The second step was to examine the outputs/results obtained by the pipeline. To achieve this: 
 
-* First, we performed a differential exon usage analysis (DEU). The code is located in the R scripts folder under the name *DEU_noaggregation_specificity.Rmd*
+* First, we performed a differential exon usage analysis (DEU). The code is located in the R scripts folder under the name ![DEU_noaggregation_specificity.Rmd](R/DEU_noaggregation_specificity.Rmd).
   
-* Second, we processed the .dpsi objects obtained from the SUPPA analysis, which was automatically performed by the pipeline. The code is located in the R scripts folder under the name *Table_of_LocalEvents.Rmd*
+* Second, we processed the .dpsi objects obtained from the SUPPA analysis, which was automatically performed by the pipeline. The code is located in the R scripts folder under the name ![Table_of_LocalEvents.Rmd](R/Table_of_LocalEvents.Rmd).
 
-* Third, we performed an analysis for the detection of aberrant gene expression events in RNA-seq data. The code is located in the R scripts folder under the name *FRASER.Rmd*
+* Third, we performed an analysis for the detection of aberrant gene expression events in RNA-seq data. The code is located in the R scripts folder under the name ![FRASER.Rmd](R/FRASER.Rmd).
 
 
 
