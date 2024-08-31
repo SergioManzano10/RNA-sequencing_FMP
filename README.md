@@ -1,6 +1,10 @@
 # RNA sequencing role in the genetic diagnosis of hereditary breast and ovarian cancer.
 This repository contains the code used to carry out the final master project titled: **RNA sequencing role in the genetic diagnosis of hereditary breast and ovarian cancer.**
 
+## Quality control (QC)
+
+Comparison of TPM values between our study and those obtained from GTEx. The code is located in the R scripts folder under the name *Correlation_test.Rmd*
+
 ## RNA-seq
 The first step was to run the **RNA-seq pipeline** using Nextflow. To achieve this: 
 
