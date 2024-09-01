@@ -16,7 +16,7 @@ The first step was to run the **RNA-seq pipeline** using Nextflow. To achieve th
 
 The second step was to examine the outputs/results obtained by the pipeline. To achieve this: 
 
-* First, we performed a differential expression analysis (DEA). The code is located in the R folder under the name ![RNA-seq.Rmd](R/RNA-seq.Rmd).
+* First, we performed a differential expression analysis (DEA) to identify the differentially expressed genes (DEG). The code is located in the R folder under the name ![RNA-seq.Rmd](R/RNA-seq.Rmd).
   
 * Second, we performed an analysis to find aberrantly expressed genes in RNA-seq samples. The code is located in the R folder under the name ![OUTRIDER.Rmd](R/OUTRIDER.Rmd).
 
