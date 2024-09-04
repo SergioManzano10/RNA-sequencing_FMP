@@ -1,0 +1,840 @@
+---
+title: "RNA-seq analysis (HBOC)"
+author: "Sergio Manzano"
+date: "2024-06-09-10"
+output:
+  BiocStyle::html_document:
+    theme: spacelab
+    number_sections: true
+    toc_float: true
+    toc_depth: 3
+---
+
+
+# Introduction
+
+This is an RNA-seq analysis performed on patients with Hereditary Breast and Ovarian Cancer (HBOC).
+
+The data has been provided by Sara Gutierrez:
+
+* IP: Sara Gutierrez
+* Type of samples: Paired-end
+* Samples: 47 affected (from AZ1953 to AZ1999) vs 6 controls (from AZ2000 to AZ2005)
+* Origin: Human samples
+* Project: TFM Sergio Manzano
+
+# Set-up the script
+
+The first thing is to configure the script. This includes setting up the working directory and loading the libraries.
+
+```{r, setup, warning=FALSE, message=FALSE}
+
+# Working directory
+setwd("C:/Users/smanz/OneDrive/Escritorio/TFM/Results/RNA-seq_analysis")
+
+# Needed libraries
+library(ggplot2)
+library(edgeR)
+library(ggfortify)
+library(dendextend)
+library(pheatmap)
+library(DESeq2)
+library(GSEABase)
+library(BasicFunctions)
+library(ComplexHeatmap)
+library(pheatmap)
+library(RColorBrewer)
+library(dplyr)
+library(ggrepel)
+library(sva)
+
+
+```
+
+# Descriptive table
+
+* In the condition column, we can observe that: *47 samples are classified as cancer (affected) and 6 samples are classified as controls*.
+* We also have that: *48 of the samples are females and 5 are males*.
+* Moreover, the patients are suffering from different types of cancer: *39 have breast cancer, 4 have ovarian cancer, 2 have pancreas adenocarcinoma and 1 has skin melanoma.*
+
+```{r Data description, echo=FALSE}
+
+descriptive <- read.table("C:/Users/smanz/OneDrive/Escritorio/TFM/Results/RNA-seq_analysis/Descriptivetable.csv", header = T, sep = ";")
+
+descriptive <- descriptive[,c(3:5)]
+descriptive$condition <- c(rep("cancer", 47), rep("control", 6))
+
+summarytable <- descriptive
+
+
+summarytable$cancer <- ifelse(
+  summarytable$cancer == "bc", "Breast cancer",
+  ifelse(summarytable$cancer == "oc", "Ovarian cancer", 
+  ifelse(summarytable$cancer == "panc adk", "Pancreas adenocarcinoma",
+  ifelse(summarytable$cancer == "skin", "Skin cancer",
+         summarytable$cancer)))
+)
+
+colnames(summarytable) <- c("Sample ID", "Sex", "Cancer type", "Condition")
+
+#table(descriptive$condition)
+#table(descriptive$sex)
+#table(descriptive$cancer)
+
+rmarkdown::paged_table(summarytable)
+
+```
+
+
+# Data loading
+
+We have used raw counts coming from the RNA-seq pipeline (nf-core) and transformed into a proper format.
+
+```{r, Data Loading}
+
+# Read the table
+Scounts <- read.table("C:/Users/smanz/OneDrive/Escritorio/TFM/Results/RNA-seq_analysis/salmon.merged.gene_counts.tsv", header = T, sep = "\t", quote = "")
+
+
+# Transform the data
+ScountsT <- data.frame(Scounts[,3:55], row.names = Scounts$gene_id)
+ScountsM <- as.matrix(ScountsT)
+
+```
+
+# Data exploration
+
+## Study the total of reads per sample (**library size**)
+
+We can see that the library size is different between samples. For that reason and because it is a normal practice, we will normalize it later in order to see sample clustering.
+
+```{r, Data Exploration ,fig.align='center'}
+
+# Calculate the CPM (counts per million)
+sampleTotal <- apply(ScountsT, 2, sum)/10^6 
+
+# Prepare the data to visualize 
+sampleTotalDF <- data.frame(sample = names(sampleTotal), total = sampleTotal)
+ 
+p <- ggplot(aes(x = sample, y = sampleTotal, fill = sampleTotal), data = sampleTotalDF) + geom_bar(stat="identity") + ylim(0, 115)
+p + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + ylab("")
+
+
+```
+
+# Filtering
+
+One of the characteristics of RNA-seq data is that it contains a lot of zeros (genes that are not expressed). It is therefore important to remove genes that have zero or very low counts. In this case we will only keep genes that have at least 10 reads in at least 6 samples. 
+
+* We can see that the filter has been applied because we initially had 29744 and now we have 16468.
+
+```{r Filtering, results = 'hide'}
+
+keep <- rowSums(ScountsM > 10) >= 6 # The number of samples would be set to the smallest group size (because we have 6 controls and 53 samples)
+countsFiltered <- ScountsM[keep,]
+
+```
+
+# Normalization
+
+There are several methods that can be used to normalize values in count matrices: *CPM* (divide the counts by library size) and *RPKM, FPKM & TPM* (the RPKM,FPKM and TPM scale the data using gene length and library size). 
+
+There is also another method called **TMM (Trimmed Mean of M Values)**, which is the one we will use in this analysis (described bellow).
+
+## TMM
+
+FPKM and TPM account for gene length and library size per sample but **do not take into account the rest of the samples belonging to the experiment**. There are situations in which *some genes can accumulate high rates of reads*. 
+
+To correct for these imbalance in the counts composition there are methods such as the **Trimmed Mean of M-values (TMM)**, included in the package `r Biocpkg("edgeR")`. This normalization is suitable for comparing among the samples, for instance *when performing sample aggregations*.
+
+```{r TMM normalization}
+
+# DEGList object creation
+dl_object <- DGEList(counts = countsFiltered) 
+
+# Compute the normalization factor
+Normalization_Factor <- calcNormFactors(dl_object, method = "TMM") 
+
+# CPM calculation using the Normalization_Factor applying logarithm
+normcountsTMM <- cpm(Normalization_Factor, log = T) 
+
+# Data distribution
+hist(normcountsTMM[,1], xlab="log2-ratio", main="TMM")
+
+```
+
+
+# Sample agregation
+
+To see how samples aggregate, we will perform *hierarchical clustering* as well as *PCA*. The purpose is to see whether samples aggregate by condition or there are some outliers, that might have a biological or technical causes.
+
+## Hierarchical clustering
+
+In this dendrogram, controls are colored in blue and cases in red.
+
+Here we can´t observe any type of aggregation. The reason could be that we are dealing with different patients that are very heterogeneous among them, taking into account all the genes, whose heterogeneity have more weight than the condition of interest.
+
+```{r Sample aggregation hierarchical clustering, fig.align='center', eval=TRUE, echo=FALSE, include=FALSE}
+
+data_x <- normcountsTMM
+
+#Euclidean distance
+clust.cor.ward <- hclust(dist(t(data_x)),method="ward.D2") 
+plot(clust.cor.ward, main="ward.D2 hierarchical clustering", hang=-1,cex=0.8)
+
+
+clust.cor.average <- hclust(dist(t(data_x)),method="average")
+plot(clust.cor.average, main="Average hierarchical clustering", hang=-1,cex=0.8)
+
+clust.cor.complete <- hclust(dist(t(data_x)),method="complete") # It shows more aggregation between controls excepting AZ2005
+plot(clust.cor.complete, main="Complete hierarchical clustering", hang=-1,cex=0.8)
+
+
+#Correlation based distance
+clust.dis.ward <- hclust(as.dist(1-cor(data_x)),method="ward.D2")
+plot(clust.cor.ward, main="ward.D2 hierarchical clustering", hang=-1,cex=0.8)
+
+clust.dis.average<- hclust(as.dist(1-cor(data_x)),method="average")
+plot(clust.cor.average, main="Average hierarchical clustering", hang=-1,cex=0.8)
+
+clust.dis.complete<- hclust(as.dist(1-cor(data_x)),method="complete")
+plot(clust.dis.complete, main="Complete hierarchical clustering", hang=-1,cex=0.8)
+
+
+```
+
+
+```{r Hierarchical clustering colored, fig.align='center'}
+
+
+#clust.cor.ward
+dend <- as.dendrogram(clust.cor.ward)
+labels_to_color <- c("AZ2000", "AZ2001", "AZ2002", "AZ2003", "AZ2004", "AZ2005")
+colors <- rep("red", length(labels(dend)))
+index<- which(labels(dend) %in% labels_to_color)
+colors[index] <- "blue"
+dend_colored <- dend %>% set("labels_colors", value = colors) %>% set("labels_cex", 0.7)
+plot(dend_colored, main = "ward.D2 hierarchical clustering", cex = 0.01)
+
+#clust.cor.average
+dend <- as.dendrogram(clust.cor.average)
+labels_to_color <- c("AZ2000", "AZ2001", "AZ2002", "AZ2003", "AZ2004", "AZ2005")
+colors <- rep("red", length(labels(dend)))
+index<- which(labels(dend) %in% labels_to_color)
+colors[index] <- "blue"
+dend_colored <- dend %>% set("labels_colors", value = colors) %>% set("labels_cex", 0.7)
+plot(dend_colored, main = "Average hierarchical clustering", cex = 0.01)
+
+#clust.cor.complete
+dend <- as.dendrogram(clust.cor.complete)
+labels_to_color <- c("AZ2000", "AZ2001", "AZ2002", "AZ2003", "AZ2004", "AZ2005")
+colors <- rep("red", length(labels(dend)))
+index <- which(labels(dend) %in% labels_to_color)
+colors[index] <- "blue"
+dend_colored <- dend %>% set("labels_colors", value = colors) %>% set("labels_cex", 0.7)
+plot(dend_colored, main = "Complete hierarchical clustering", cex = 0.01)
+
+
+
+```
+
+## PCA
+
+Again, we can´t observe any type of aggregation. The reason could be the same as in the hierarchical clustering.
+
+```{r Sample aggregation PCA without labels, fig.align='center'}
+
+# PCA without labels 
+pca <- prcomp(t(data_x), scale = T)
+autoplot(pca, data = data.frame(Sample = colnames(data_x)), colour = 'Sample')
+
+# PCA with labels
+pca_df <- data.frame(pca$x)
+
+pca_df$Sample <- colnames(data_x)
+
+ggplot(pca_df, aes(x = PC1, y = PC2, label = Sample, color = Sample)) +
+  geom_point(size = 2) +
+  geom_text(vjust = -0.5, hjust = 0.5) +
+  labs(title = "PCA",
+       x = "PC1 (26.63%)",
+       y = "PC2 (20.1%)") +
+  theme_minimal()
+
+# PCA with condition labels
+pca_df <- data.frame(pca$x)
+pca_df$condition <- c(rep("cancer", 47), rep("control", 6))
+pca_df$Sample <- colnames(data_x)
+
+ggplot(pca_df, aes(x = PC1, y = PC2, label = Sample, color = condition)) +
+  geom_point(size = 2) +
+  geom_text(vjust = -0.5, hjust = 0.5) +
+  labs(title = "PCA",
+       x = "PC1 (26.63%)",
+       y = "PC2 (20.1%)") +
+  theme_minimal()
+
+
+```
+
+# Differential expression analysis
+
+## VOOM + Limma approach
+
+When constructing the design matrix, we can include or not some covariates in order to adjust the model. In the next steps, different models have been tried.
+
+### Matrix design (without including any covariate)
+
+In this case we have obtained 97 genes that are differentially expressed (p-value < 0.05) after performing the FDR adjustment. Among them, 93 are down-regulated and 4 are up-regulated.
+
+```{r without including covariates}
+
+# design matrix
+design <- model.matrix(~0 + descriptive$condition)
+rownames(design) <- descriptive$CNAG.code
+colnames(design) <- c("cancer", "control")
+
+# Apply the VOOM transformation (plot the mean-variance trend)
+voom.res <- voom(countsFiltered, design, plot = TRUE)
+
+# Model fit
+fit <- lmFit(voom.res, design)
+
+# contrasts
+contrast.matrix <- makeContrasts(cancer - control, levels = design)
+
+# contrasts fit and Bayesian adjustment
+fit2 <- contrasts.fit(fit, contrast.matrix)
+fited <- eBayes(fit2)
+
+
+# Summary
+summary(decideTests(fited, method = "separate")) #dim(top.table[top.table$adj.P.Val<0.05,]) #dim(top.table[top.table$adj.P.Val>0.05,])
+
+# Global model
+top.table <- topTable(fited, number = Inf, adjust = "fdr") 
+
+# DEG
+DE_genes <- top.table[top.table$adj.P.Val<0.05,]
+head(DE_genes)
+
+
+```
+
+The distribution appears to be correct (uniform for non-DEGs and with a peak in DEG genes).
+
+```{r pval distribution 1, include = T, fig.align='center'}
+
+hist(top.table$P.Value, breaks = 100, main = "p-values top table distribution")
+
+```
+
+### Matrix design (including two covariates: sex and cancer type)
+
+In this case we have not obtained DE genes.
+
+```{r including covariates}
+
+# design matrix
+design <- model.matrix(~0 + descriptive$condition + descriptive$sex + descriptive$cancer)
+rownames(design) <- descriptive$CNAG.code
+colnames(design) <- c("cancer", "control", "male", "healthy", "oc", "pancadk", "skin")
+
+# Apply the VOOM transformation (plot the mean-variance trend)
+voom.res <- voom(countsFiltered, design, plot = TRUE)
+
+# Model fit
+fit <- lmFit(voom.res, design)
+
+# contrasts
+contrast.matrix <- makeContrasts(cancer - control, levels = design)
+
+# contrasts fit and Bayesian adjustment
+fit2 <- contrasts.fit(fit, contrast.matrix)
+fited <- eBayes(fit2)
+
+
+# Summary
+summary(decideTests(fited, method = "separate")) #dim(top.table[top.table$adj.P.Val<0.05,]) #dim(top.table[top.table$adj.P.Val>0.05,])
+
+# Global model
+top.table <- topTable(fited, number = Inf, adjust = "fdr") 
+
+# DEG
+DE_genes <- top.table[top.table$adj.P.Val<0.05,]
+head(DE_genes)
+
+```
+
+The distribution appears to be incorrect.
+
+```{r pval distribution 2, include = T, fig.align='center'}
+
+hist(top.table$P.Value, breaks = 100, main = "p-values top table distribution")
+
+```
+
+### Matrix design (including surrogate variables as covariates)
+
+First, we have analyzed the surrogate variables (SVA) to see the differences between **conditions**, which seems to be *more or less similar*.
+
+Then, we have analyzed the SVA to see the differences between **samples**. We can see that in this case the most important SVA are the two first, because the different samples *are not distributed homogeneously*.
+
+```{r SVA Variable Importace, fig.align='center'}
+
+# Per condition
+mod1 <- model.matrix(~0 + descriptive$condition)
+
+svaseq_result <- svaseq(countsFiltered, mod1)
+svaseq <- svaseq_result$sv
+
+par(mfrow = c(2, 2))
+
+for (i in 1:6) {
+  stripchart(svaseq[, i] ~ descriptive$condition, vertical = TRUE, main = paste0("SV", i))
+  abline(h = 0)
+}
+
+SV1 <- svaseq[,1] 
+SV2 <- svaseq[,2]
+
+
+# Per sample
+mod1 <- model.matrix(~0 + descriptive$condition)
+svaseq_result <- svaseq(countsFiltered, mod1)
+svaseq <- svaseq_result$sv
+
+par(mfrow = c(2, 2)) 
+for (i in 1:6) {
+  stripchart(svaseq[, i] ~ descriptive$CNAG.code, vertical = TRUE, main = paste0("SV", i))
+  abline(h = 0)
+}
+
+
+SV1 <- svaseq[,1] 
+SV2 <- svaseq[,2]
+
+```
+
+
+#### Analysis including all the SVA
+
+In the case that we have included all the SVA, we have obtained 1718 genes that are differentially expressed (adj.P.Val < 0.05) after performing the FDR adjustment. Of which, 1658 are down-regulated and 60 are up-regulated.
+
+```{r Including all the SV}
+
+
+mod1 <- model.matrix(~0 + descriptive$condition)
+svaseq <- svaseq(countsFiltered, mod1)$sv
+
+design2 <-model.matrix(~0 + descriptive$condition+svaseq)
+
+rownames(design2) <- descriptive$CNAG.code
+colnames(design2) <- c("cancer", "control", "svaseq1", "svaseq2", "svaseq3", "svaseq4", "svaseq5", "svaseq6")
+
+# Apply the VOOM transformation (plot the mean-variance trend)
+voom.res <- voom(countsFiltered, design2, plot = TRUE)
+
+# Model fit
+fit <- lmFit(voom.res, design2)
+
+# contrasts
+contrast.matrix <- makeContrasts(cancer - control, levels = design2)
+
+# contrasts fit and Bayesian adjustment
+fit2 <- contrasts.fit(fit, contrast.matrix)
+fited <- eBayes(fit2)
+
+
+# Summary
+summary(decideTests(fited, method = "separate")) #dim(top.table[top.table$adj.P.Val<0.05,]) #dim(top.table[top.table$adj.P.Val>0.05,])
+
+# Global model
+top.table <- topTable(fited, number = Inf, adjust = "fdr") 
+
+# DEG
+DE_genes <- top.table[top.table$adj.P.Val<0.05,]
+head(DE_genes)
+
+
+```
+
+The distribution appears to be correct (uniform for non-DEGs and with a peak in DEG genes).
+
+```{r pval distribution 4, include = T, fig.align='center'}
+
+hist(top.table$P.Value, breaks = 100, main = "p-values top table distribution")
+
+```
+
+#### Analysis including the first 2 SVA
+
+In the case that we have included the first 2 SVA, we have obtained 123 genes that are differentially expressed (adj.P.Val < 0.05) after performing the FDR adjustment. Of which, 120 are down-regulated and 3 are up-regulated.
+
+
+```{r Including SVA1 and SVA2, warning=FALSE, message=FALSE}
+
+mod1 <- model.matrix(~0 + descriptive$condition)
+svaseq <- svaseq(countsFiltered, mod1)$sv
+
+design2 <-model.matrix(~0 + descriptive$condition+SV1+SV2)
+
+rownames(design2) <- descriptive$CNAG.code
+colnames(design2) <- c("cancer", "control", "SV1", "SV2")
+
+# Apply the VOOM transformation (plot the mean-variance trend)
+voom.res <- voom(countsFiltered, design2, plot = TRUE)
+
+# Model fit
+fit <- lmFit(voom.res, design2)
+
+# contrasts
+contrast.matrix <- makeContrasts(cancer - control, levels = design2)
+
+# contrasts fit and Bayesian adjustment
+fit2 <- contrasts.fit(fit, contrast.matrix)
+fited <- eBayes(fit2)
+
+
+# Summary
+summary(decideTests(fited, method = "separate")) #dim(top.table[top.table$adj.P.Val<0.05,]) #dim(top.table[top.table$adj.P.Val>0.05,])
+
+# Global model
+top.table <- topTable(fited, number = Inf, adjust = "fdr") 
+
+# DEG
+DE_genes <- top.table[top.table$adj.P.Val<0.05,]
+head(DE_genes)
+
+
+```
+
+The distribution appears to be correct (uniform for non-DEGs and with a peak in DEG genes).
+
+```{r pval distribution 3, include = T, fig.align='center'}
+
+hist(top.table$P.Value, breaks = 100, main = "p-values top table distribution")
+
+```
+
+### Heatmaps
+
+#### Heatmap of the normalized counts without taking into account the diferential expression analysis and selecting the genes of interest
+
+```{r Genes selection}
+
+genes_of_interest <- c("BRCA1", "BRCA2", "PALB2", "MLH1", "MSH2", "MSH6", "TP53", "BARD1", "CHEK2", "ATM", "BRIP1", "RAD51C", "RAD51D", "PTEN", "CDH1")
+
+normcounts_TMM_interest <- normcountsTMM[rownames(normcountsTMM) %in% genes_of_interest, ]
+
+```
+
+This heatmap shows the z-scores obtained in the TMM normalization method.
+
+```{r Pheatmap TMM, fig.align='center'}
+
+pheatmap(
+  mat = normcounts_TMM_interest,
+  color = colorRampPalette(c("blue", "white", "red"))(100),
+  scale = "row",
+  fontsize_col = 7,
+  border_color = NA,
+  column_title = "Individuals", 
+  row_title = "Genes",
+  name = "z-scores",
+  cluster_cols = TRUE,
+  annotation_col = data.frame(Condition = descriptive$condition, Gender = descriptive$sex, Cancer_Type = descriptive$cancer))
+
+
+```
+
+#### Heatmap of the normalized counts taking into account the diferential expression analysis
+
+This heatmap shows the z-scores obtained in the TMM normalization method. It is showing only the top 50 differentially expressed genes.
+
+```{r Condition Heatmap DEG, fig.align='center', eval=TRUE}
+
+TMM_DE_genes <- subset(normcountsTMM, rownames(normcountsTMM) %in% rownames(DE_genes))
+TMM_DE_genes <- TMM_DE_genes[1:50,]
+
+pheatmap(
+  mat = TMM_DE_genes,
+  color = colorRampPalette(c("blue", "white", "red"))(100),
+  scale = "row",
+  fontsize_col = 7,
+  fontsize_row = 5,
+  border_color = NA,
+  column_title = "Individuals", 
+  row_title = "Genes",
+  name = "z-scores",
+  cluster_cols = TRUE,
+  annotation_col = data.frame(Condition = descriptive$condition, Gender = descriptive$sex, Cancer_Type = descriptive$cancer))
+
+```
+
+#### Heatmap of the normalized counts taking into account the diferential expression analysis, but selecting the genes of interest with a **p.val < 0.05** (in the previous cases I have selected **adj.P.Val<0.05**)
+
+```{r Pheatmap DEG interest, fig.align='center', eval=TRUE}
+
+DE_genes_pval <- top.table[top.table$P.Value<0.05,]
+
+DE_genes_pval_names <- DE_genes_pval[rownames(DE_genes_pval) %in% genes_of_interest, ]
+
+DE_genes_pval_int <- subset(normcountsTMM, rownames(normcountsTMM) %in% rownames(DE_genes_pval_names))
+
+pheatmap(
+  mat = DE_genes_pval_int,
+  color = colorRampPalette(c("blue", "white", "red"))(100),
+  scale = "row",
+  fontsize_col = 7,
+  fontsize_row = 7,
+  border_color = NA,
+  column_title = "Individuals", 
+  row_title = "Genes",
+  name = "z-scores",
+  cluster_cols = TRUE,
+  annotation_col = data.frame(Condition = descriptive$condition, Gender = descriptive$sex, Cancer_Type = descriptive$cancer))
+
+```
+
+#### Heatmap of the normalized counts taking into account the diferential expression analysis, but selecting the genes of interest with an **adj.P.Val < 0.05**.
+
+When we use the 2 first 2 SVA, we don´t have genes of interest with an adj.P.Val < 0.05.
+
+```{r Heatmap DEG interest, fig.align='center', eval=FALSE}
+
+DE_genes_pval <- top.table[top.table$adj.P.Val<0.05,]
+
+DE_genes_pval_names <- DE_genes_pval[rownames(DE_genes_pval) %in% genes_of_interest, ]
+
+DE_genes_pval_int <- subset(normcountsTMM, rownames(normcountsTMM) %in% rownames(DE_genes_pval_names))
+
+pheatmap(
+  mat = DE_genes_pval_int,
+  color = colorRampPalette(c("blue", "white", "red"))(100),
+  scale = "row",
+  fontsize_col = 7,
+  fontsize_row = 7,
+  border_color = NA,
+  column_title = "Individuals", 
+  row_title = "Genes",
+  name = "z-scores",
+  cluster_cols = TRUE,
+  annotation_col = data.frame(Condition = descriptive$condition, Gender = descriptive$sex, Cancer_Type = descriptive$cancer))
+
+```
+
+### Volcano Plots
+
+#### Volcano plot corresponding to VOOM analysis (DEGs)
+
+This plot includes all the genes derived from the VOOM analysis, top DEG genes are highlighted (in red the ones that are up-regulated and in blue the ones that are down-regulated). 
+
+To do the volcano plots, we are using the data obtained after adjusting the model using the 2 first SVA.
+
+```{r Volcano Plot, fig.align='center', warning=FALSE, message=FALSE}
+
+
+
+colors <- c("blue", "grey", "red")
+
+showGenes <- 25
+
+Volcano_data <-  top.table
+
+
+Volcano_data2 <- Volcano_data %>% mutate(gene = rownames(Volcano_data), logp = -(log10(P.Value)), logadjp = -(log10(adj.P.Val)),
+                          FC = ifelse(logFC>0, 2^logFC, -(2^abs(logFC)))) %>%
+                   mutate(sig = ifelse(adj.P.Val<0.05 & logFC > 1, "UP", ifelse(adj.P.Val<0.05 & logFC < (-1), "DN","n.s"))) 
+
+                          
+p <- ggplot(data=Volcano_data2, aes(x=logFC, y=logp )) +
+     geom_point(alpha = 1, size= 1, aes(col = sig)) + 
+     scale_color_manual(values = colors) +
+     xlab(expression("log"[2]*"FC")) + ylab(expression("-log"[10]*"(p.val)")) + labs(col=" ") + 
+     geom_vline(xintercept = 1, linetype= "dotted") + geom_vline(xintercept = -1, linetype= "dotted") + 
+     geom_hline(yintercept = -log10(0.1), linetype= "dotted")  +  theme_bw()
+
+p <- p + geom_text_repel(data = head(Volcano_data2[Volcano_data2$sig != "n.s",], showGenes), aes(label = gene)) 
+
+print(p)
+
+```
+
+
+#### Volcano plot corresponding to VOOM analysis (genes of interest)
+
+This plot includes all the genes derived from the VOOM analysis. But in this case we are highlighting the genes of interest.
+
+We can see that any of them is classified as DEG, since the adj.p.val is not less tan 0.05.
+
+```{r Volcano Plot genes of interest, fig.align='center', warning=FALSE, message=FALSE}
+
+colors <- c("blue", "grey", "red")
+showGenes <- 20
+Volcano_data <- top.table
+
+genes_of_interest <- c("BRCA1", "BRCA2", "PALB2", "MLH1", "MSH2", "MSH6", "TP53", "BARD1", "CHEK2", "ATM", "BRIP1", "RAD51C", "RAD51D", "PTEN", "CDH1")   
+
+Volcano_data2 <- Volcano_data %>% 
+  mutate(gene = rownames(Volcano_data), 
+         logp = -(log10(P.Value)), 
+         logadjp = -(log10(adj.P.Val)),
+         FC = ifelse(logFC > 0, 2^logFC, -(2^abs(logFC)))) %>%
+  mutate(sig = ifelse(adj.P.Val<0.05 & logFC > 1, "UP", ifelse(adj.P.Val<0.05 & logFC < (-1), "DN","n.s")))
+
+
+highlighted_genes <- Volcano_data2 %>% filter(gene %in% genes_of_interest)
+
+p <- ggplot(data = Volcano_data2, aes(x = logFC, y = logp)) +
+  geom_point(alpha = 1, size = 1, aes(col = sig)) + 
+  scale_color_manual(values = colors) +
+  xlab(expression("log"[2] * "FC")) + 
+  ylab(expression("-log"[10] * "(p.val)")) + 
+  labs(col = " ") + 
+  geom_vline(xintercept = 1, linetype = "dotted") + 
+  geom_vline(xintercept = -1, linetype = "dotted") + 
+  geom_hline(yintercept = -log10(0.1), linetype = "dotted") + 
+  theme_bw()
+
+p <- p + geom_text_repel(data = highlighted_genes, aes(label = gene), max.overlaps = Inf)
+
+print(p)
+
+
+# With bordered labels
+library(ggplot2)
+library(dplyr)
+library(ggrepel)
+
+colors <- c("blue", "grey", "red")
+showGenes <- 20
+Volcano_data <- top.table
+
+genes_of_interest <- c("BRCA1", "BRCA2", "PALB2", "MLH1", "MSH2", "MSH6", "TP53", "BARD1", "CHEK2", "ATM", "BRIP1", "RAD51C", "RAD51D", "PTEN", "CDH1")
+
+Volcano_data2 <- Volcano_data %>% 
+  mutate(gene = rownames(Volcano_data), 
+         logp = -(log10(P.Value)), 
+         logadjp = -(log10(adj.P.Val)),
+         FC = ifelse(logFC > 0, 2^logFC, -(2^abs(logFC)))) %>%
+  mutate(sig = ifelse(adj.P.Val<0.05 & logFC > 1, "UP", ifelse(adj.P.Val<0.05 & logFC < (-1), "DN","n.s")))
+
+highlighted_genes <- Volcano_data2 %>% filter(gene %in% genes_of_interest)
+
+p <- ggplot(data = Volcano_data2, aes(x = logFC, y = logp)) +
+  geom_point(alpha = 1, size = 1, aes(col = sig)) + 
+  scale_color_manual(values = colors) +
+  xlab(expression("log"[2] * "FC")) + 
+  ylab(expression("-log"[10] * "(p.val)")) + 
+  labs(col = " ") + 
+  geom_vline(xintercept = 1, linetype = "dotted") + 
+  geom_vline(xintercept = -1, linetype = "dotted") + 
+  geom_hline(yintercept = -log10(0.1), linetype = "dotted") + 
+  theme_bw()
+
+p <- p + geom_label_repel(data = highlighted_genes, aes(label = gene), max.overlaps = Inf)
+
+print(p)
+
+
+```
+
+# Functional analysis
+
+This analysis has not been included in the written report.
+
+## KEGG
+
+```{r KEGG, fig.align='center', warning=FALSE, message=FALSE}
+
+library(clusterProfiler)
+library(org.Hs.eg.db)
+
+de_genes <- rownames(top.table)
+
+entrez_ids <- bitr(de_genes, fromType = "SYMBOL", toType = "ENTREZID", OrgDb = org.Hs.eg.db)
+
+kegg_enrich <- enrichKEGG(gene = entrez_ids$ENTREZID, organism = "hsa", keyType = "kegg", pvalueCutoff = 0.05)
+
+head(kegg_enrich)
+
+
+dotplot(kegg_enrich, showCategory = 20)
+
+```
+
+## GO
+
+### BP, CC and MF
+
+```{r BP. CC and MF}
+
+# BP
+go_bp_enrich <- enrichGO(gene = entrez_ids$ENTREZID, OrgDb = org.Hs.eg.db, keyType = "ENTREZID", ont = "BP", pvalueCutoff = 0.05)
+dotplot(go_bp_enrich, showCategory = 20)
+
+# CC
+go_bp_enrich <- enrichGO(gene = entrez_ids$ENTREZID, OrgDb = org.Hs.eg.db, keyType = "ENTREZID", ont = "CC", pvalueCutoff = 0.05)
+dotplot(go_bp_enrich, showCategory = 20)
+
+# MF
+go_bp_enrich <- enrichGO(gene = entrez_ids$ENTREZID, OrgDb = org.Hs.eg.db, keyType = "ENTREZID", ont = "MF", pvalueCutoff = 0.05)
+dotplot(go_bp_enrich, showCategory = 20)
+
+```
+
+# Molecular Signatures analysis (oncogenic signature)
+
+## GSEA running 
+
+To download specific gmt files, we can go to the following link: https://www.gsea-msigdb.org/gsea/msigdb/human/collections.jsp#C6
+
+
+```{r GSEA data preparation and running, warning=FALSE, message=FALSE}
+
+# Prepare the data
+sign <- sign(top.table[,c("logFC")])
+logP <- -log10(top.table[,c("adj.P.Val")])
+metric <- logP*sign
+geneList <- metric
+geneList <- sort(geneList, decreasing=TRUE)
+names(geneList) <- rownames(top.table)
+
+
+# Load the gmt file
+gmt <- read.gmt("c6.all.v2023.2.Hs.symbols.gmt")
+
+# Run the GSEA
+gsea_result <- clusterProfiler::GSEA(geneList, TERM2GENE = gmt, verbose=FALSE, seed=T, minGSSize = 15, maxGSSize = 500, pvalueCutoff = 0.05)
+ 
+
+```
+
+## GSEA results
+
+In the graphic we can see that there are three sets related with experiments in the breast cancer field:
+
+* RAF_UP.V1_UP: Genes up-regulated in MCF-7 cells (breast cancer) positive for ESR1 [GeneID=2099] MCF-7 cells (breast cancer) stably over-expressing constitutively active RAF1 [GeneID=5894] gene.
+
+* LTE2_UP.V1_UP:  Genes up-regulated in MCF-7 cells (breast cancer) positive for ESR1 [GeneID=2099] MCF-7 cells (breast cancer) and long-term adapted for estrogen-independent growth.
+
+* CYCLIN_D1_KE_.V1_UP: 	Genes up-regulated in MCF-7 cells (breast cancer) over-expressing a mutant K112E form of CCND1 [GeneID=595] gene.
+
+```{r, fig.align='center', warning=FALSE}
+
+top_n <- 12
+gsea_result_top <- gsea_result[1:top_n, ]
+
+ggplot(gsea_result_top, aes(x = reorder(ID, NES), y = NES, fill = p.adjust)) +
+    geom_bar(stat = "identity") +
+    coord_flip() +
+    labs(title = "Hallmark GSEA analysis", x = "ID", y = "Normalized Enrichment Score (NES)") +
+    scale_fill_gradient(low = "blue", high = "red") +
+    scale_y_continuous(limits = c(-2, 2)) +
+    theme_classic()
+
+```
+
+
+
