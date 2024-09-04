@@ -645,7 +645,7 @@ Volcano_data <-  top.table
 
 Volcano_data2 <- Volcano_data %>% mutate(gene = rownames(Volcano_data), logp = -(log10(P.Value)), logadjp = -(log10(adj.P.Val)),
                           FC = ifelse(logFC>0, 2^logFC, -(2^abs(logFC)))) %>%
-                   mutate(sig = ifelse(P.Value<0.05 & logFC > 1, "UP", ifelse(P.Value<0.05 & logFC < (-1), "DN","n.s"))) 
+                   mutate(sig = ifelse(adj.P.Val<0.05 & logFC > 1, "UP", ifelse(adj.P.Val<0.05 & logFC < (-1), "DN","n.s"))) 
 
                           
 p <- ggplot(data=Volcano_data2, aes(x=logFC, y=logp )) +
